@@ -1,0 +1,35 @@
+name: Groq PR Review
+
+on:
+  workflow_call:
+    secrets:
+      groq_api_key:
+        description: Groq API key used only for PR-Agent inference
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: groq-pr-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Review pull request with PR-Agent
+        uses: The-PR-Agent/pr-agent@8e4d32e5497defd43c023a404f73560c62728961 # v0.39.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GROQ.KEY: ${{ secrets.groq_api_key }}
+          CONFIG.MODEL: groq/openai/gpt-oss-120b
+          CONFIG.FALLBACK_MODELS: '["groq/llama-3.3-70b-versatile"]'
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "false"
+          github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review", "review_requested"]'
