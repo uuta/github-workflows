@@ -1,6 +1,6 @@
 # Reusable Groq PR review
 
-This repository provides a GitHub native reusable workflow that runs the open-source PR-Agent review tool with Groq. It performs review only: PR description and code-improvement tools are disabled. The workflow does not check out or execute pull request code.
+This repository provides a GitHub native reusable workflow that runs the open-source PR-Agent review and improve tools with Groq. It publishes an aggregate review summary and, when actionable suggestions are found, committable inline code suggestions. Automatic PR description is disabled, and the workflow does not check out or execute pull request code.
 
 The job succeeds only when PR-Agent publishes or updates its `## PR Reviewer Guide` comment during the current run; a silent PR-Agent exit without review feedback fails the workflow.
 

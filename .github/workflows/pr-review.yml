@@ -36,8 +36,9 @@ jobs:
           CONFIG.FALLBACK_MODELS: '["groq/llama-3.3-70b-versatile"]'
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
-          github_action_config.auto_improve: "false"
+          github_action_config.auto_improve: "true"
           github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review", "review_requested"]'
+          pr_code_suggestions.commitable_code_suggestions: "true"
 
       - name: Verify PR-Agent published a review
         shell: bash
