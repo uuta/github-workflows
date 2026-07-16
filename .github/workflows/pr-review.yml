@@ -1,10 +1,10 @@
-name: Groq PR Review
+name: OpenRouter PR Review
 
 on:
   workflow_call:
     secrets:
-      groq_api_key:
-        description: Groq API key used only for PR-Agent inference
+      OPENROUTER_API_KEY:
+        description: OpenRouter API key used only for PR-Agent inference
         required: true
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: groq-pr-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  group: openrouter-pr-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -31,9 +31,11 @@ jobs:
         uses: The-PR-Agent/pr-agent@8e4d32e5497defd43c023a404f73560c62728961 # v0.39.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          GROQ.KEY: ${{ secrets.groq_api_key }}
-          CONFIG.MODEL: groq/openai/gpt-oss-120b
-          CONFIG.FALLBACK_MODELS: '["groq/llama-3.3-70b-versatile"]'
+          OPENROUTER.KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CONFIG.MODEL: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+          CONFIG.FALLBACK_MODELS: '["openrouter/stepfun/step-3.7-flash"]'
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "1000000"
+          CONFIG.MAX_MODEL_TOKENS: "64000"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
