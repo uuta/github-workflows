@@ -1,0 +1,71 @@
+name: OpenRouter PR Review
+
+on:
+  workflow_call:
+    secrets:
+      OPENROUTER_API_KEY:
+        description: OpenRouter API key used only for PR-Agent inference
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: openrouter-pr-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Record review start time
+        id: review_start
+        shell: bash
+        run: echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Review pull request with PR-Agent
+        uses: The-PR-Agent/pr-agent@8e4d32e5497defd43c023a404f73560c62728961 # v0.39.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OPENROUTER.KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CONFIG.MODEL: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+          CONFIG.FALLBACK_MODELS: '["openrouter/stepfun/step-3.7-flash"]'
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "1000000"
+          CONFIG.MAX_MODEL_TOKENS: "64000"
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "true"
+          github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review", "review_requested"]'
+          pr_code_suggestions.commitable_code_suggestions: "true"
+
+      - name: Verify PR-Agent published a review
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_STARTED_AT: ${{ steps.review_start.outputs.timestamp }}
+        run: |
+          set -euo pipefail
+
+          comments="$(
+            gh api --paginate --slurp \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100"
+          )"
+
+          if ! jq -e --arg started_at "$REVIEW_STARTED_AT" '
+            any(
+              .[][];
+              .user.login == "github-actions[bot]"
+              and ((.body // "") | contains("## PR Reviewer Guide"))
+              and ((.updated_at // "") >= $started_at)
+            )
+          ' <<<"$comments" >/dev/null; then
+            echo "::error::PR-Agent exited without publishing or updating its PR review comment."
+            exit 1
+          fi
