@@ -6,7 +6,7 @@ The recommended setup is command-driven: an authorized maintainer posts `/review
 
 Automatic review on `pull_request` events remains supported for callers that intentionally keep it. In that mode the workflow runs both the review and improve tools: it publishes the aggregate review summary and, when actionable suggestions are found, committable inline code suggestions.
 
-The job succeeds only when PR-Agent publishes or updates its `## PR Reviewer Guide` comment during the current run; a silent PR-Agent exit without review feedback fails the workflow.
+Before invoking PR-Agent, the workflow classifies the pull request diff with a hand-maintained filter snapshot aligned with the currently pinned PR-Agent release. The snapshot must be updated when the PR-Agent pin moves. A diff is skipped successfully with an Actions notice when every changed path has a binary or other ignored extension, matches the fixed lockfile list, ends in `.min.js`, `.min.css`, `.js.map`, `.ts.map`, or `.css.map`, or has no added or deleted text lines. Diffs over 20,000 changed lines among the remaining preflight-reviewable files are also skipped successfully, with an explanatory pull request comment. For normal reviewable diffs, the job succeeds only when PR-Agent publishes or updates its `## PR Reviewer Guide` comment during the current run; a silent PR-Agent exit without review feedback still fails the workflow.
 
 ## Recommended: command-driven reviews with `/review`
 
@@ -32,6 +32,20 @@ jobs:
 ```
 
 Replace the all-zero placeholder with the full commit SHA of a released version of this workflow. Pinning a full SHA protects callers from unexpected changes.
+
+The default oversized-diff ceiling is 20,000 added and deleted lines across files that pass the preflight snapshot. Paths with binary or other ignored extensions do not count. The fixed excluded basename list is `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `composer.lock`, `Gemfile.lock`, `poetry.lock`, `go.sum`, `.terraform.lock.hcl`, `uv.lock`, `Cargo.lock`, `Pipfile.lock`, `mix.lock`, `pubspec.lock`, and `bun.lockb`; files ending in `.min.js`, `.min.css`, `.js.map`, `.ts.map`, or `.css.map` are also excluded. Callers can override the ceiling with the reusable workflow input `max_changed_lines`, which must be a positive integer:
+
+```yaml
+jobs:
+  review:
+    uses: uuta/github-workflows/.github/workflows/pr-review.yml@0000000000000000000000000000000000000000
+    with:
+      max_changed_lines: 10000
+    secrets:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+```
+
+Intentional no-reviewable-file and oversized skips conclude successfully; authentication, API, configuration, and unexpected missing-review failures remain failures.
 
 `issue_comment` workflows only run from the version of the workflow file on the repository's **default branch**. The caller workflow above must be merged to the default branch before GitHub dispatches any `/review` comment to it.
 
@@ -90,3 +104,5 @@ Because this is a public reusable workflow, each caller supplies its own OpenRou
 ## Repository-specific review rules
 
 For repository-specific review rules, callers may add a `.pr_agent.toml` file to their own repository. Keep model selection and credentials in the reusable workflow and use that file only for review behavior, such as `[pr_reviewer]` settings and `extra_instructions`.
+
+Preflight classification does not apply caller-defined `ignore.glob`, `ignore.regex`, or `ignore_language_framework` rules. If those rules cause PR-Agent to filter every file that preflight considered reviewable, no reviewer-guide comment is published and the normal missing-review verification fails.

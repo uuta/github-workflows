@@ -2,6 +2,12 @@ name: OpenRouter PR Review
 
 on:
   workflow_call:
+    inputs:
+      max_changed_lines:
+        description: Maximum changed text lines that can be sent to PR-Agent
+        required: false
+        type: number
+        default: 20000
     secrets:
       OPENROUTER_API_KEY:
         description: OpenRouter API key used only for PR-Agent inference
@@ -64,12 +70,129 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Inspect pull request diff
+        id: diff_check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          MAX_CHANGED_LINES: ${{ inputs.max_changed_lines }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$MAX_CHANGED_LINES" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::max_changed_lines must be a positive integer."
+            exit 1
+          fi
+
+          name_only_available=true
+          if ! changed_files="$(gh pr diff "$PR_NUMBER" --repo "$REPOSITORY" --name-only 2>&1)"; then
+            if [[ "$changed_files" == *"HTTP 406"* || "$changed_files" == *"too_large"* ]]; then
+              echo "::notice::GitHub could not render the oversized name-only diff; using pull file metadata."
+              changed_files=""
+              name_only_available=false
+            else
+              echo "::error::Could not inspect pull request file names: $changed_files"
+              exit 1
+            fi
+          fi
+
+          if [ "$name_only_available" = true ] && [ -z "$changed_files" ]; then
+            echo "::notice::Pull request has no changed files; skipping PR-Agent."
+            echo "review_expected=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=no_reviewable_text" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed_files_json="$(jq -Rsc 'split("\n") | map(select(length > 0))' <<<"$changed_files")"
+          pull_files="$(
+            gh api --paginate --slurp \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100"
+          )"
+
+          read -r reviewable_files changed_lines < <(
+            jq -r \
+              --argjson changed_files "$changed_files_json" \
+              --argjson restrict_to_names "$name_only_available" '
+              # Keep this aligned with is_valid_file in the pinned PR-Agent release.
+              def pr_agent_reviewable:
+                .filename as $filename
+                | ($filename | split("/")[-1]) as $basename
+                | ($filename | split(".")[-1]) as $extension
+                | [
+                    "app", "bin", "bmp", "bz2", "class", "csv", "dat", "db", "dll",
+                    "dylib", "egg", "eot", "exe", "gif", "gitignore", "glif", "gradle",
+                    "gz", "ico", "jar", "jpeg", "jpg", "lo", "lock", "log", "mp3",
+                    "mp4", "nar", "o", "ogg", "otf", "p", "pdf", "png", "pickle",
+                    "pkl", "pyc", "pyd", "pyo", "rkt", "so", "ss", "svg", "tar",
+                    "tgz", "tsv", "ttf", "war", "webm", "woff", "woff2", "xz", "zip",
+                    "zst", "snap", "lockb"
+                  ] as $bad_extensions
+                | [
+                    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock",
+                    "Gemfile.lock", "poetry.lock", "go.sum", ".terraform.lock.hcl", "uv.lock",
+                    "Cargo.lock", "Pipfile.lock", "mix.lock", "pubspec.lock", "bun.lockb"
+                  ] as $generated_files
+                | [".min.js", ".min.css", ".js.map", ".ts.map", ".css.map"] as $generated_suffixes
+                | ($bad_extensions | index($extension)) == null
+                and ($generated_files | index($basename)) == null
+                and all(
+                  $generated_suffixes[];
+                  . as $suffix | ($filename | endswith($suffix) | not)
+                );
+
+              [
+                .[][]
+                | select(
+                    ($restrict_to_names | not)
+                    or (.filename as $filename | $changed_files | index($filename) != null)
+                  )
+                | select(pr_agent_reviewable)
+                | select(((.additions // 0) + (.deletions // 0)) > 0)
+              ]
+              | [length, (map((.additions // 0) + (.deletions // 0)) | add // 0)]
+              | @tsv
+            ' <<<"$pull_files"
+          )
+
+          if [ "$reviewable_files" -eq 0 ]; then
+            echo "::notice::Pull request has no reviewable text changes; skipping PR-Agent."
+            echo "review_expected=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=no_reviewable_text" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$changed_lines" -gt "$MAX_CHANGED_LINES" ]; then
+            skip_comment="$(cat <<EOF
+          ## AI review skipped
+
+          PR-Agent was not run because this pull request changes ${changed_lines} text lines, exceeding the configured limit of ${MAX_CHANGED_LINES}. Please split the change into smaller pull requests to request AI review.
+          EOF
+            )"
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -f body="$skip_comment" >/dev/null
+            echo "::notice::Diff has ${changed_lines} changed text lines (limit: ${MAX_CHANGED_LINES}); skipping PR-Agent."
+            echo "review_expected=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=oversized" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "review_expected=true" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=" >> "$GITHUB_OUTPUT"
+
       - name: Record review start time
         id: review_start
+        if: steps.diff_check.outputs.review_expected == 'true'
         shell: bash
         run: echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Review pull request with PR-Agent
+        if: steps.diff_check.outputs.review_expected == 'true'
         uses: The-PR-Agent/pr-agent@ab6ec54bfeb37933ddb74259338752e9272016c6 # v0.44.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -86,6 +209,7 @@ jobs:
           pr_code_suggestions.focus_only_on_problems: "false"
 
       - name: Verify PR-Agent published a review
+        if: steps.diff_check.outputs.review_expected == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
