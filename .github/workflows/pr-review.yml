@@ -203,7 +203,7 @@ jobs:
 
       - name: Review pull request with PR-Agent
         if: steps.diff_check.outputs.review_expected == 'true'
-        uses: The-PR-Agent/pr-agent@ab6ec54bfeb37933ddb74259338752e9272016c6 # v0.44.0
+        uses: The-PR-Agent/pr-agent@efdde4afe14aa401a3889012c7f3e9ef3081a430 # v0.49.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
           OPENROUTER.KEY: ${{ secrets.OPENROUTER_API_KEY }}
