@@ -8,6 +8,16 @@ on:
         required: false
         type: number
         default: 20000
+      auto_improve:
+        description: Run PR-Agent's code-suggestion (improve) pass after the review
+        required: false
+        type: boolean
+        default: true
+      timeout_minutes:
+        description: Timeout for the review job, in minutes
+        required: false
+        type: number
+        default: 15
     secrets:
       OPENROUTER_API_KEY:
         description: OpenRouter API key used only for PR-Agent inference
@@ -68,7 +78,7 @@ jobs:
       group: openrouter-pr-review-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
       - name: Inspect pull request diff
         id: diff_check
@@ -203,7 +213,7 @@ jobs:
           CONFIG.MAX_MODEL_TOKENS: "64000"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
-          github_action_config.auto_improve: "true"
+          github_action_config.auto_improve: ${{ inputs.auto_improve && 'true' || 'false' }}
           github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review", "review_requested"]'
           pr_code_suggestions.commitable_code_suggestions: "true"
           pr_code_suggestions.focus_only_on_problems: "false"
